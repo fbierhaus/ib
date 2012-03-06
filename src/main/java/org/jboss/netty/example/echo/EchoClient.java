@@ -17,7 +17,10 @@ package org.jboss.netty.example.echo;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -30,6 +33,8 @@ import org.jboss.netty.channel.ChannelFuture;
 import org.jboss.netty.channel.ChannelPipeline;
 import org.jboss.netty.channel.ChannelPipelineFactory;
 import org.jboss.netty.channel.Channels;
+import org.jboss.netty.channel.group.ChannelGroup;
+import org.jboss.netty.channel.group.DefaultChannelGroup;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
 
 /**
@@ -42,12 +47,16 @@ public class EchoClient {
 
     private final String host;
     private final int port;
+    private final int numClients;
+    private final int numRequests;
     private final ChannelBuffer messageBuffer;
     
-    public EchoClient(String host, int port, String message) {
+    public EchoClient(String host, int port, String message, int numClients, int numRequests) {
         this.host = host;
         this.port = port;
-        this.messageBuffer = ChannelBuffers.copiedBuffer(message, Charset.forName("US-ASCII"));
+        this.numClients = numClients;
+        this.numRequests = numRequests;
+        this.messageBuffer = ChannelBuffers.copiedBuffer(message + "\r\n", Charset.forName("US-ASCII"));
     }
 
     public void run() {
@@ -64,14 +73,41 @@ public class EchoClient {
             }
         });
 
-        // Start the connection attempt.
-        ChannelFuture future = bootstrap.connect(new InetSocketAddress(host, port));
+        ArrayBlockingQueue <Runnable> workQueue = new ArrayBlockingQueue<Runnable>(numRequests);
+        ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(numClients, numClients + 3, 10, TimeUnit.SECONDS, workQueue);
+        
+        ChannelGroup allChannels = new DefaultChannelGroup();
+        
+        // Start the connection attempts.
+        ChannelFuture[] channelFutures = fireEmUp(numClients, bootstrap);
+        for(int i = 0; i < numClients; i++){
+        	allChannels.add(channelFutures[i].getChannel());
+        	threadPoolExecutor.execute(new ClientThread(messageBuffer, channelFutures[i]));
+        }
 
-        // Wait until the connection is closed or the connection attempt fails.
-        future.getChannel().getCloseFuture().awaitUninterruptibly();
-
+        allChannels.close().awaitUninterruptibly();
+        
         // Shut down thread pools to exit.
+        threadPoolExecutor.shutdown();
         bootstrap.releaseExternalResources();
+    }
+    
+    protected ChannelFuture[] fireEmUp(int numClients, ClientBootstrap bootstrap){
+    	ChannelFuture[] channelFutures = new ChannelFuture[numClients];
+    	for(int i = 0; i < numClients; i++){
+    		channelFutures[i] = bootstrap.connect(new InetSocketAddress(host, port));
+    		// Do we want to wait here?
+    		channelFutures[i].awaitUninterruptibly();
+    		if(!channelFutures[i].isSuccess()){
+    			System.err.println("Channel " + i + " failed: " + channelFutures[i].getCause());
+    			// Die here, if we cant connect all the channels we want
+    			// This is a load test, after all
+    			System.exit(-1);
+    		}else {
+    			System.out.println("Connected: " + i);
+    		}
+    	}
+    	return channelFutures;
     }
 
     public static void main(String[] args) throws Exception {
@@ -81,7 +117,7 @@ public class EchoClient {
 
     	options.addOption("h", true, "host");
     	options.addOption("p", true, "port");
-    	options.addOption("n", true, "number of connections");
+    	options.addOption("n", true, "number of requests");
     	options.addOption("c", true, "number of concurrent connections");
     	
     	CommandLineParser parser = new PosixParser();
@@ -97,8 +133,10 @@ public class EchoClient {
         // Parse options.
         final String host = cmd.getOptionValue("h");
         final int port = Integer.parseInt(cmd.getOptionValue("p"));
+        final int numClients = Integer.parseInt(cmd.getOptionValue("c"));
+        final int numRequests = Integer.parseInt(cmd.getOptionValue("n"));
 
-        new EchoClient(host, port, imap_command).run();
+        new EchoClient(host, port, imap_command, numClients, numRequests).run();
     }
 }
 

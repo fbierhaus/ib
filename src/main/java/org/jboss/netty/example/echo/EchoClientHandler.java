@@ -24,14 +24,14 @@ import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.channel.ExceptionEvent;
 import org.jboss.netty.channel.MessageEvent;
-import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
+import org.jboss.netty.channel.SimpleChannelHandler;
 
 /**
  * Handler implementation for the echo client.  It initiates the ping-pong
  * traffic between the echo client and server by sending the first message to
  * the server.
  */
-public class EchoClientHandler extends SimpleChannelUpstreamHandler {
+public class EchoClientHandler extends SimpleChannelHandler {
 
     private static final Logger logger = Logger.getLogger(
             EchoClientHandler.class.getName());
@@ -51,16 +51,12 @@ public class EchoClientHandler extends SimpleChannelUpstreamHandler {
     }
 
     @Override
-    public void channelConnected(
-            ChannelHandlerContext ctx, ChannelStateEvent e) {
-        // Send the first message.  Server will not send anything here
-        // because the firstMessage's capacity is 0.
+    public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) {
         e.getChannel().write(message);
     }
 
     @Override
     public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) {
-    	// do nothing, for now
     	System.out.println(e.getMessage());
     }
 
