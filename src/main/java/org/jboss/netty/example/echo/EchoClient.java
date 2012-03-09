@@ -17,10 +17,8 @@ package org.jboss.netty.example.echo;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
-import java.util.concurrent.ArrayBlockingQueue;
+import java.util.Iterator;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -29,6 +27,7 @@ import org.apache.commons.cli.PosixParser;
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
+import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFuture;
 import org.jboss.netty.channel.ChannelPipeline;
 import org.jboss.netty.channel.ChannelPipelineFactory;
@@ -48,14 +47,12 @@ public class EchoClient {
     private final String host;
     private final int port;
     private final int numClients;
-    private final int numRequests;
     private final ChannelBuffer messageBuffer;
     
-    public EchoClient(String host, int port, String message, int numClients, int numRequests) {
+    public EchoClient(String host, int port, String message, int numClients) {
         this.host = host;
         this.port = port;
         this.numClients = numClients;
-        this.numRequests = numRequests;
         this.messageBuffer = ChannelBuffers.copiedBuffer(message + "\r\n", Charset.forName("US-ASCII"));
     }
 
@@ -69,45 +66,71 @@ public class EchoClient {
         // Set up the pipeline factory.
         bootstrap.setPipelineFactory(new ChannelPipelineFactory() {
             public ChannelPipeline getPipeline() throws Exception {
-                return Channels.pipeline(new EchoClientHandler(messageBuffer));
+                return Channels.pipeline(new EchoClientHandler());
             }
         });
 
-        ArrayBlockingQueue <Runnable> workQueue = new ArrayBlockingQueue<Runnable>(numRequests);
-        ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(numClients, numClients + 3, 10, TimeUnit.SECONDS, workQueue);
-        
-        ChannelGroup allChannels = new DefaultChannelGroup();
+       
         
         // Start the connection attempts.
-        ChannelFuture[] channelFutures = fireEmUp(numClients, bootstrap);
-        for(int i = 0; i < numClients; i++){
-        	allChannels.add(channelFutures[i].getChannel());
-        	threadPoolExecutor.execute(new ClientThread(messageBuffer, channelFutures[i]));
-        }
+        ChannelGroup allChannels = fireEmUp(numClients, bootstrap);
 
+        // Iterate and write
+        Iterator<Channel> iter = allChannels.iterator();
+        int n = 0;
+        while (iter.hasNext()) {
+			Channel channel = (Channel) iter.next();
+			channel.write(messageBuffer);
+			if (n%100 == 0) {
+				try {
+					Thread.sleep(50);
+					System.out.println(n + " messages written");
+				} catch (InterruptedException e) {
+				}
+			}
+			n++;
+		}
+        
+        // let's try sleeping so the client doesn't close the channel before 
+        // the server has written response
+        try {
+			Thread.sleep(1000);
+		} catch (InterruptedException e) {
+		}
+        
         allChannels.close().awaitUninterruptibly();
         
         // Shut down thread pools to exit.
-        threadPoolExecutor.shutdown();
         bootstrap.releaseExternalResources();
     }
     
-    protected ChannelFuture[] fireEmUp(int numClients, ClientBootstrap bootstrap){
-    	ChannelFuture[] channelFutures = new ChannelFuture[numClients];
+    protected ChannelGroup fireEmUp(int numClients, ClientBootstrap bootstrap){
+        ChannelGroup allChannels = new DefaultChannelGroup();
+        ChannelFuture channelFuture;
     	for(int i = 0; i < numClients; i++){
-    		channelFutures[i] = bootstrap.connect(new InetSocketAddress(host, port));
+    		channelFuture = bootstrap.connect(new InetSocketAddress(host, port));
     		// Do we want to wait here?
-    		channelFutures[i].awaitUninterruptibly();
-    		if(!channelFutures[i].isSuccess()){
-    			System.err.println("Channel " + i + " failed: " + channelFutures[i].getCause());
-    			// Die here, if we cant connect all the channels we want
+    		channelFuture.awaitUninterruptibly();
+    		if(!channelFuture.isSuccess()){
+    			System.err.println("Channel " + i + " failed: " + channelFuture.getCause());
+    			// Die here, if we can't connect all the channels we want
     			// This is a load test, after all
     			System.exit(-1);
     		}else {
-    			System.out.println("Connected: " + i);
+            	allChannels.add(channelFuture.getChannel());
+            	if (i%100 == 0) {
+					System.out.println(i + " channels connected");
+				}
     		}
+    		// sleep for a little to allow server to catch up
+    		if (i%100 == 0) {
+				try {
+					Thread.sleep(100);
+				} catch (InterruptedException e) {
+				}
+			}
     	}
-    	return channelFutures;
+    	return allChannels;
     }
 
     public static void main(String[] args) throws Exception {
@@ -117,7 +140,6 @@ public class EchoClient {
 
     	options.addOption("h", true, "host");
     	options.addOption("p", true, "port");
-    	options.addOption("n", true, "number of requests");
     	options.addOption("c", true, "number of concurrent connections");
     	
     	CommandLineParser parser = new PosixParser();
@@ -134,9 +156,8 @@ public class EchoClient {
         final String host = cmd.getOptionValue("h");
         final int port = Integer.parseInt(cmd.getOptionValue("p"));
         final int numClients = Integer.parseInt(cmd.getOptionValue("c"));
-        final int numRequests = Integer.parseInt(cmd.getOptionValue("n"));
+        new EchoClient(host, port, imap_command, numClients).run();
 
-        new EchoClient(host, port, imap_command, numClients, numRequests).run();
     }
 }
 

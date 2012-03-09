@@ -19,11 +19,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.channel.ExceptionEvent;
-import org.jboss.netty.channel.MessageEvent;
 import org.jboss.netty.channel.SimpleChannelHandler;
 
 /**
@@ -36,29 +33,23 @@ public class EchoClientHandler extends SimpleChannelHandler {
     private static final Logger logger = Logger.getLogger(
             EchoClientHandler.class.getName());
 
-    private final ChannelBuffer message;
     private final AtomicLong transferredBytes = new AtomicLong();
 
     /**
      * Creates a client-side handler.
      */
-    public EchoClientHandler(ChannelBuffer message) {
-    	this.message = message;
+    public EchoClientHandler() {
     }
 
     public long getTransferredBytes() {
         return transferredBytes.get();
     }
 
-    @Override
-    public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) {
-        e.getChannel().write(message);
-    }
 
-    @Override
-    public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) {
-    	System.out.println(e.getMessage());
-    }
+//    @Override
+//    public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) {
+//    	System.out.println(e.getMessage());
+//    }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) {
